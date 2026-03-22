@@ -205,18 +205,14 @@ def state_to_tree(state: State) -> Tree:
             if depth == 0:
                 root_children_above.append(i)
             else:
-                child_idx = last_by_depth[depth-1]
-                assert child_idx is not None
-                children_above[child_idx].append(i)
+                children_above[_unwrap(last_by_depth[depth-1])].append(i)
         last_by_depth[depth] = i
     children_below: list[list[int]] = [[] for _ in range(len(state))]
     last_by_depth = [None] * len(state)
     for i in range(len(state)-1,-1,-1):
         _, depth, anchored_right, _ = state[i]
         if anchored_right:
-            child_idx = last_by_depth[depth-1]
-            assert child_idx is not None
-            children_below[child_idx].append(i)
+            children_below[_unwrap(last_by_depth[depth-1])].append(i)
         last_by_depth[depth] = i
     for cb in children_below:
         cb.reverse()
