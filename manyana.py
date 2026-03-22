@@ -466,6 +466,39 @@ def test_insert_low_tree():
     right = update_state(initial, ['A', 'B'])
     check_merges(updated, right, ['X', 'Y', 'A', 'B'])
 
+def check_associative(a, b, c):
+    ab, _ = merge_states(a, b)
+    ab_c, _ = merge_states(ab, c)
+    bc, _ = merge_states(b, c)
+    a_bc, _ = merge_states(a, bc)
+    assert ab_c == a_bc
+    assert current_lines(ab_c) == current_lines(a_bc)
+
+def test_associativity():
+    s = initial_state(['A', 'B'])
+    a = update_state(s, ['A', 'X', 'B'])
+    b = update_state(s, ['A', 'Y', 'B'])
+    c = update_state(s, ['A', 'B', 'Z'])
+    check_associative(a, b, c)
+    a = update_state(s, ['B'])
+    b = update_state(s, ['A'])
+    c = update_state(s, ['A', 'B', 'C'])
+    check_associative(a, b, c)
+    a = update_state(update_state(s, []), ['A', 'B'])
+    b = update_state(s, [])
+    c = update_state(s, [])
+    check_associative(a, b, c)
+    a = initial_state(['P'])
+    b = initial_state(['Q'])
+    c = initial_state(['R'])
+    check_associative(a, b, c)
+    s = initial_state(['M'])
+    left = update_state(s, ['M', 'L'])
+    right = update_state(s, ['R', 'M'])
+    merged, _ = merge_states(left, right)
+    check_associative(left, right, merged)
+    check_associative(merged, left, update_state(s, []))
+
 if __name__ == '__main__':
     import inspect
     for name, func in list(globals().items()):
