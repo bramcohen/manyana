@@ -14,14 +14,18 @@ from difflib import SequenceMatcher
 # state is enough information about the history of a file for future merges
 # state size is linear on the history
 
-State: TypeAlias = list[tuple[str, int, bool, int]]
+StateItem: TypeAlias = tuple[str, int, bool, int]
+State: TypeAlias = list[StateItem]
+
+OutputItem: TypeAlias = tuple[Optional[str], int, bool, int, int, int]
+Output: TypeAlias = list[OutputItem]
+
 Tree: TypeAlias = tuple[Optional[str], int, list["Tree"], list["Tree"], int]
-Output: TypeAlias = list[tuple[Optional[str], int, bool, int, int, int]]
 
 T = TypeVar("T")
 def _unwrap(x: Optional[T]) -> T:
     if x is None:
-        raise ValueError
+        raise ValueError("_unwrap called on None")
     return x
 
 # returns state string
@@ -43,13 +47,11 @@ def update_state(raw_state: str, lines: list[str]) -> str:
     deletions, insertions = get_deletions_and_insertions([x[0] for x in state], lines)
     for deletion in deletions:
         if state[deletion][3] % 2:
-            a,b,c,d = state[deletion]
-            state[deletion] = a,b,c,d+1
+            state[deletion] = _incr_count(state[deletion])
     deleted_set = set(deletions)
     for i in range(len(state)):
         if i not in deleted_set and state[i][3] % 2 == 0:
-            a,b,c,d = state[i]
-            state[i] = a,b,c,d+1
+            state[i] = _incr_count(state[i])
     result: State = []
     pos_in_insertions = 0
     for pos in range(len(state)+1):
@@ -71,6 +73,10 @@ def update_state(raw_state: str, lines: list[str]) -> str:
         if pos < len(state):
             result.append(state[pos])
     return serialize_state(result)
+
+def _incr_count(item: StateItem) -> StateItem:
+    line, depth, anchored_right, count = item
+    return line, depth, anchored_right, count+1
 
 # Called when doing a merge
 # returns (state_string, file_with_conflict_annotations)
@@ -111,13 +117,11 @@ def merge_states(state1: str, state2: str) -> tuple[str, list[str]]:
             if i < len(status_lines):
                 result_lines.append((_unwrap(status_lines[i][0]), PEACE))
             begin = i + 1
-    return (serialize_state(_output_to_state(status_lines)), show_conflicts(result_lines))
+    return (serialize_state([_output_item_to_state_item(x) for x in status_lines]), show_conflicts(result_lines))
 
-def _output_to_state(output: Output) -> State:
-    def _one(x: tuple[Optional[str], int, bool, int, int, int]) -> tuple[str, int, bool, int]:
-        a,b,c,d,_,_ = x
-        return _unwrap(a),b,c,d
-    return [_one(x) for x in output]
+def _output_item_to_state_item(x: OutputItem) -> StateItem:
+    line, depth, anchored_right, count, _, _ = x
+    return _unwrap(line), depth, anchored_right, count
 
 # returns ([deleted_line_number], [(insert_position, [inserted_line])])
 def get_deletions_and_insertions(lines1: list[str], lines2: list[str]) -> tuple[list[int], list[tuple[int, list[str]]]]:
