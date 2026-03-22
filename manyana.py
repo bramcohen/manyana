@@ -404,7 +404,7 @@ from itertools import permutations
 def test_insertions():
     mylist = [initial_state([x]) for x in ('A', 'B', 'C', 'D')]
     for perm in permutations(mylist):
-        test_insertions_single(*mylist)
+        test_insertions_single(*perm)
 
 def test_insertions_below_single(a, b, c, d):
     state1, junk1 = merge_states(a, b)
@@ -416,7 +416,7 @@ def test_insertions_below():
     initial = initial_state(['X'])
     mylist = [update_state(initial, [x, 'X']) for x in ('A', 'B', 'C', 'D')]
     for perm in permutations(mylist):
-        test_insertions_below_single(*mylist)
+        test_insertions_below_single(*perm)
 
 def test_space_separated_insert_insert():
     initial = initial_state([''])
