@@ -231,13 +231,9 @@ The exact serialization format used is meant as a demo, not a standard. That sai
 
 ## Running Tests
 
-The test suite is built into the module:
-
 ```bash
-python manyana.py
+python -m pytest tests/test_manyana.py -v
 ```
-
-All test functions prefixed with `test` are discovered and run automatically. No output means all tests passed.
 
 ## Provenance
 
