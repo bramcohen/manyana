@@ -74,7 +74,8 @@ def merge_states(state1, state2):
             hit_left = False
             hit_right = False
             for j in range(begin, i):
-                line, depth, anchored_right, in_child, on_left, on_right = status_lines[j]
+                line, depth, anchored_right, count, on_left, on_right = status_lines[j]
+                in_child = count % 2
                 if on_left != on_right:
                     if in_child == on_left:
                         hit_left = True
@@ -84,13 +85,14 @@ def merge_states(state1, state2):
                     found_add = True
             if hit_left and hit_right and found_add:
                 for j in range(begin, i):
-                    line, depth, anchored_right, in_child, on_left, on_right = status_lines[j]
+                    line, depth, anchored_right, count, on_left, on_right = status_lines[j]
+                    in_child = count % 2
                     if on_left or on_right:
                         result_lines.append((line, conflict_code(in_child, on_left, on_right)))
             else:
                 for j in range(begin, i):
-                    line, depth, anchored_right, in_child, on_left, on_right = status_lines[j]
-                    if in_child:
+                    line, depth, anchored_right, count, on_left, on_right = status_lines[j]
+                    if count % 2:
                         result_lines.append((line, PEACE))
             if i < len(status_lines):
                 result_lines.append((status_lines[i][0], PEACE))
@@ -210,7 +212,7 @@ def merge_trees(output, tree1, tree2, anchored_right):
     assert depth1 == depth2
     merge_tree_lists(output, lowtrees1, lowtrees2, True)
     if line1 is not None:
-        output.append((line1, depth1, anchored_right, max(count1, count2) % 2, count1 % 2, count2 % 2))
+        output.append((line1, depth1, anchored_right, max(count1, count2), count1 % 2, count2 % 2))
     merge_tree_lists(output, hightrees1, hightrees2, False)
 
 def merge_tree_lists(output, left_trees, right_trees, anchored_right):
@@ -238,7 +240,7 @@ def insert_tree(output, tree, from_right, anchored_right):
     line, count, lowtrees, hightrees, depth = tree
     for new_tree in lowtrees:
         insert_tree(output, new_tree, from_right, True)
-    output.append((line, depth, anchored_right, count % 2, not from_right, from_right))
+    output.append((line, depth, anchored_right, count, not from_right, from_right))
     for new_tree in hightrees:
         insert_tree(output, new_tree, from_right, False)
 
