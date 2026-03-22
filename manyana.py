@@ -500,7 +500,20 @@ def test_associativity():
     check_associative(merged, left, update_state(s, []))
 
 if __name__ == '__main__':
-    import inspect
+    import inspect, traceback
+    passes = 0
+    failures = 0
     for name, func in list(globals().items()):
         if name.startswith('test') and callable(func) and not inspect.signature(func).parameters:
-            func()
+            try:
+                func()
+                print("PASS:", name)
+                passes += 1
+            except Exception:
+                print("FAIL:", name)
+                traceback.print_exc()
+                print()
+                failures += 1
+    print(f"{passes} tests passed, {failures} tests failed")
+    if failures:
+        raise SystemExit(1)
