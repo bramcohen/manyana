@@ -499,3 +499,4 @@ if __name__ == '__main__':
     for name, func in list(globals().items()):
         if name.startswith('test') and callable(func) and not inspect.signature(func).parameters:
             func()
+    print("all tests pass")
