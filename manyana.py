@@ -2,6 +2,7 @@ from typing import Optional, TypeAlias, TypeVar
 from itertools import permutations
 from difflib import SequenceMatcher
 from enum import unique, Enum
+from dataclasses import dataclass
 
 # Code for eventually consistent merging and UX for it
 # external API is initial_state, current_lines, update_state, and merge_states
@@ -15,7 +16,13 @@ from enum import unique, Enum
 # state is enough information about the history of a file for future merges
 # state size is linear on the history
 
-StateItem: TypeAlias = tuple[str, int, bool, int]
+@dataclass(frozen=True)
+class StateItem:
+    line: str
+    depth: int
+    anchored_right: bool
+    count: int
+
 State: TypeAlias = list[StateItem]
 
 OutputItem: TypeAlias = tuple[Optional[str], int, bool, int, int, int]
@@ -31,12 +38,12 @@ def _unwrap(x: Optional[T]) -> T:
 
 # returns state string
 def initial_state(lines: list[str]) -> str:
-    return serialize_state([(line, i, False, 1) for i, line in enumerate(lines)])
+    return serialize_state([StateItem(line, i, False, 1) for i, line in enumerate(lines)])
 
 # reconstructs [line]
 def current_lines(raw_state: str) -> list[str]:
     state = deserialize_state(raw_state)
-    return [line for (line, _, _, count) in state if count % 2]
+    return [x.line for x in state if x.count % 2]
 
 # Called at commit time
 # returns state_string
@@ -45,13 +52,13 @@ def update_state(raw_state: str, lines: list[str]) -> str:
     if not state:
         return initial_state(lines)
     # Ideally matching would bias towards living lines
-    deletions, insertions = get_deletions_and_insertions([x[0] for x in state], lines)
+    deletions, insertions = get_deletions_and_insertions([x.line for x in state], lines)
     for deletion in deletions:
-        if state[deletion][3] % 2:
+        if state[deletion].count % 2 == 1:
             state[deletion] = _incr_count(state[deletion])
     deleted_set = set(deletions)
     for i in range(len(state)):
-        if i not in deleted_set and state[i][3] % 2 == 0:
+        if i not in deleted_set and state[i].count % 2 == 0:
             state[i] = _incr_count(state[i])
     result: State = []
     pos_in_insertions = 0
@@ -62,22 +69,21 @@ def update_state(raw_state: str, lines: list[str]) -> str:
             elif pos == 0:
                 up = False
             else:
-                up = state[pos-1][1] > state[pos][1]
+                up = state[pos-1].depth > state[pos].depth
             newlines = insertions[pos_in_insertions][1]
             if up:
-                result.append((newlines[0], state[pos-1][1]+1, False, 1))
+                result.append(StateItem(newlines[0], state[pos-1].depth+1, False, 1))
             else:
-                result.append((newlines[0], state[pos][1]+1, True, 1))
+                result.append(StateItem(newlines[0], state[pos].depth+1, True, 1))
             for line in newlines[1:]:
-                result.append((line, result[-1][1]+1, False, 1))
+                result.append(StateItem(line, result[-1].depth+1, False, 1))
             pos_in_insertions += 1
         if pos < len(state):
             result.append(state[pos])
     return serialize_state(result)
 
-def _incr_count(item: StateItem) -> StateItem:
-    line, depth, anchored_right, count = item
-    return line, depth, anchored_right, count+1
+def _incr_count(x: StateItem) -> StateItem:
+    return StateItem(x.line, x.depth, x.anchored_right, x.count+1)
 
 # Called when doing a merge
 # returns (state_string, file_with_conflict_annotations)
@@ -122,7 +128,7 @@ def merge_states(state1: str, state2: str) -> tuple[str, list[str]]:
 
 def _output_item_to_state_item(x: OutputItem) -> StateItem:
     line, depth, anchored_right, count, _, _ = x
-    return _unwrap(line), depth, anchored_right, count
+    return StateItem(_unwrap(line), depth, anchored_right, count)
 
 # returns ([deleted_line_number], [(insert_position, [inserted_line])])
 def get_deletions_and_insertions(lines1: list[str], lines2: list[str]) -> tuple[list[int], list[tuple[int, list[str]]]]:
@@ -136,11 +142,10 @@ def get_deletions_and_insertions(lines1: list[str], lines2: list[str]) -> tuple[
             insertions.append((l1_begin, lines2[l2_begin:l2_end]))
     return (deletions, insertions)
 
-# state format is [(line, depth, anchored_right, count)]
 def serialize_state(state: State) -> str:
     result: list[str] = []
-    for (line, depth, anchored_right, count) in state:
-        result.append(f'{depth} {['<', '>'][anchored_right]} {count} {line}')
+    for x in state:
+        result.append(f'{x.depth} {['<', '>'][x.anchored_right]} {x.count} {x.line}')
     return '\n'.join(result)
 
 def deserialize_state(mystr: str) -> State:
@@ -149,7 +154,7 @@ def deserialize_state(mystr: str) -> State:
         return []
     for line in mystr.split('\n'):
         vals = line.split(' ')
-        result.append((' '.join(vals[3:]), int(vals[0]), vals[1] == '>', int(vals[2])))
+        result.append(StateItem(' '.join(vals[3:]), int(vals[0]), vals[1] == '>', int(vals[2])))
     return result
 
 CONFLICT_STRS = ['added left', 'added right', 'added both',
@@ -206,32 +211,32 @@ def state_to_tree(state: State) -> Tree:
     children_above: list[list[int]] = [[] for _ in range(len(state))]
     last_by_depth: list[Optional[int]] = [None] * len(state)
     for i in range(len(state)):
-        _, depth, anchored_right, _ = state[i]
-        if not anchored_right:
-            if depth == 0:
+        state_item = state[i]
+        if not state_item.anchored_right:
+            if state_item.depth == 0:
                 root_children_above.append(i)
             else:
-                children_above[_unwrap(last_by_depth[depth-1])].append(i)
-        last_by_depth[depth] = i
+                children_above[_unwrap(last_by_depth[state_item.depth-1])].append(i)
+        last_by_depth[state_item.depth] = i
     children_below: list[list[int]] = [[] for _ in range(len(state))]
     last_by_depth = [None] * len(state)
     for i in range(len(state)-1,-1,-1):
-        _, depth, anchored_right, _ = state[i]
-        if anchored_right:
-            children_below[_unwrap(last_by_depth[depth-1])].append(i)
-        last_by_depth[depth] = i
+        state_item = state[i]
+        if state_item.anchored_right:
+            children_below[_unwrap(last_by_depth[state_item.depth-1])].append(i)
+        last_by_depth[state_item.depth] = i
     for cb in children_below:
         cb.reverse()
     return (None, -1, [], [pull_out_tree(i, state, children_above, children_below) for i in root_children_above], -1)
 
 def pull_out_tree(pos: int, state: State, children_above: list[list[int]], children_below: list[list[int]]) -> Tree:
-    line, depth, _, count = state[pos]
+    state_item = state[pos]
     return (
-        line,
-        count,
+        state_item.line,
+        state_item.count,
         [pull_out_tree(x, state, children_above, children_below) for x in children_below[pos]],
         [pull_out_tree(x, state, children_above, children_below) for x in children_above[pos]],
-        depth
+        state_item.depth
     )
 
 # format of tree is (line, count, [low_trees], [high_trees], depth)
