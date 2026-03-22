@@ -1,6 +1,7 @@
 from typing import Optional, TypeAlias, TypeVar
 from itertools import permutations
 from difflib import SequenceMatcher
+from enum import unique, Enum
 
 # Code for eventually consistent merging and UX for it
 # external API is initial_state, current_lines, update_state, and merge_states
@@ -87,7 +88,7 @@ def merge_states(state1: str, state2: str) -> tuple[str, list[str]]:
     tree2 = state_to_tree(deserialize_state(state2))
     status_lines: Output = []
     merge_trees(status_lines, tree1, tree2, False)
-    result_lines: list[tuple[str, int]] = []
+    result_lines: list[tuple[str, Conflict]] = []
     begin = 0
     for i in range(len(status_lines)+1):
         if i == len(status_lines) or (status_lines[i][4] and
@@ -113,9 +114,9 @@ def merge_states(state1: str, state2: str) -> tuple[str, list[str]]:
                 for j in range(begin, i):
                     line, _, _, in_child, on_left, on_right = status_lines[j]
                     if in_child:
-                        result_lines.append((_unwrap(line), PEACE))
+                        result_lines.append((_unwrap(line), Conflict.PEACE))
             if i < len(status_lines):
-                result_lines.append((_unwrap(status_lines[i][0]), PEACE))
+                result_lines.append((_unwrap(status_lines[i][0]), Conflict.PEACE))
             begin = i + 1
     return (serialize_state([_output_item_to_state_item(x) for x in status_lines]), show_conflicts(result_lines))
 
@@ -151,49 +152,54 @@ def deserialize_state(mystr: str) -> State:
         result.append((' '.join(vals[3:]), int(vals[0]), vals[1] == '>', int(vals[2])))
     return result
 
-CONFLICT_ADDED_LEFT = 0
-CONFLICT_ADDED_RIGHT = 1
-CONFLICT_ADDED_BOTH = 2
-CONFLICT_DELETED_LEFT = 3
-CONFLICT_DELETED_RIGHT = 4
-PEACE = 5
-
-conflict_strings = ['added left', 'added right', 'added both',
+CONFLICT_STRS = ['added left', 'added right', 'added both',
         'deleted left', 'deleted right', 'deleted both']
+
+@unique
+class Conflict(Enum):
+    ADDED_LEFT = 0
+    ADDED_RIGHT = 1
+    ADDED_BOTH = 2
+    DELETED_LEFT = 3
+    DELETED_RIGHT = 4
+    PEACE = 5
+
+    def to_str(self) -> str:
+        return CONFLICT_STRS[self.value]
 
 END = '>>>>>>> end conflict'
 
-def show_conflicts(result_lines: list[tuple[str, int]]) -> list[str]:
+def show_conflicts(result_lines: list[tuple[str, Conflict]]) -> list[str]:
     final_result: list[str] = []
-    last_state = PEACE
+    last_state = Conflict.PEACE
     for line, new_state in result_lines:
-        if new_state == PEACE:
-            if last_state != PEACE:
+        if new_state == Conflict.PEACE:
+            if last_state != Conflict.PEACE:
                 final_result.append(END)
-        elif last_state == PEACE:
-            final_result.append('<<<<<<< begin ' + conflict_strings[new_state])
+        elif last_state == Conflict.PEACE:
+            final_result.append('<<<<<<< begin ' + new_state.to_str())
         elif last_state != new_state:
-            final_result.append('======= begin ' + conflict_strings[new_state])
+            final_result.append('======= begin ' + new_state.to_str())
         final_result.append(line)
         last_state = new_state
-    if last_state != PEACE:
+    if last_state != Conflict.PEACE:
         final_result.append(END)
     return final_result
 
-def conflict_code(in_child: int, on_left: int, on_right: int) -> int:
+def conflict_code(in_child: int, on_left: int, on_right: int) -> Conflict:
     assert on_left or on_right
     if in_child:
         if on_left and on_right:
-            return CONFLICT_ADDED_BOTH
+            return Conflict.ADDED_BOTH
         elif on_left:
-            return CONFLICT_ADDED_LEFT
+            return Conflict.ADDED_LEFT
         else:
-            return CONFLICT_ADDED_RIGHT
+            return Conflict.ADDED_RIGHT
     else:
         if on_right:
-            return CONFLICT_DELETED_LEFT
+            return Conflict.DELETED_LEFT
         else:
-            return CONFLICT_DELETED_RIGHT
+            return Conflict.DELETED_RIGHT
 
 def state_to_tree(state: State) -> Tree:
     root_children_above: list[int] = []
