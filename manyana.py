@@ -499,6 +499,26 @@ def test_associativity():
     check_associative(left, right, merged)
     check_associative(merged, left, update_state(s, []))
 
+def check_idempotent(state):
+    merged, _ = merge_states(state, state)
+    assert merged == state
+
+def test_idempotency():
+    check_idempotent(initial_state([]))
+    check_idempotent(initial_state(['A', 'B', 'C']))
+    state = initial_state(['A', 'B'])
+    check_idempotent(state)
+    state = update_state(state, ['A', 'X', 'B'])
+    check_idempotent(state)
+    state = update_state(state, ['A', 'B'])
+    check_idempotent(state)
+    state = update_state(state, ['A', 'X', 'B'])
+    check_idempotent(state)
+    left = update_state(initial_state(['M']), ['M', 'L'])
+    right = update_state(initial_state(['M']), ['R', 'M'])
+    merged, _ = merge_states(left, right)
+    check_idempotent(merged)
+
 if __name__ == '__main__':
     import inspect, traceback
     passes = 0
