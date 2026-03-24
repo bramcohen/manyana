@@ -1,7 +1,8 @@
+import unittest
 from typing import Optional
 from itertools import permutations
+
 from manyana import initial_state, merge_states, current_lines, update_state, END
-import unittest
 
 def swap_left_right(s: str) -> str:
     s = s.replace('left', 'swap')
