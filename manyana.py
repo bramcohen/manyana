@@ -27,14 +27,6 @@ State: TypeAlias = list[StateItem]
 
 @dataclass(frozen=True)
 class OutputItem:
-    """
-    0: line
-    1: depth
-    2: anchored_right
-    3: count
-    4: on_left
-    5: on_right
-    """
     line: Optional[str]
     depth: int
     anchored_right: bool
@@ -44,7 +36,13 @@ class OutputItem:
 
 Output: TypeAlias = list[OutputItem]
 
-Tree: TypeAlias = tuple[Optional[str], int, list["Tree"], list["Tree"], int]
+@dataclass(frozen=True)
+class Tree:
+    line: Optional[str]
+    count: int
+    low_trees: list["Tree"]
+    high_trees: list["Tree"]
+    depth: int
 
 T = TypeVar("T")
 def _unwrap(x: Optional[T]) -> T:
@@ -242,11 +240,11 @@ def state_to_tree(state: State) -> Tree:
         last_by_depth[state_item.depth] = i
     for cb in children_below:
         cb.reverse()
-    return (None, -1, [], [pull_out_tree(i, state, children_above, children_below) for i in root_children_above], -1)
+    return Tree(None, -1, [], [pull_out_tree(i, state, children_above, children_below) for i in root_children_above], -1)
 
 def pull_out_tree(pos: int, state: State, children_above: list[list[int]], children_below: list[list[int]]) -> Tree:
     state_item = state[pos]
-    return (
+    return Tree(
         state_item.line,
         state_item.count,
         [pull_out_tree(x, state, children_above, children_below) for x in children_below[pos]],
@@ -254,19 +252,21 @@ def pull_out_tree(pos: int, state: State, children_above: list[list[int]], child
         state_item.depth
     )
 
-# format of tree is (line, count, [low_trees], [high_trees], depth)
 # line is None for the root
-# lines in output are of format (line, depth, anchored_right, count, on_left, on_right)
-# state format is [(line, depth, anchored_right, count)]
 def merge_trees(output: Output, tree1: Tree, tree2: Tree, anchored_right: bool):
-    line1, count1, lowtrees1, hightrees1, depth1 = tree1
-    line2, count2, lowtrees2, hightrees2, depth2 = tree2
-    assert line1 == line2
-    assert depth1 == depth2
-    merge_tree_lists(output, lowtrees1, lowtrees2, True)
-    if line1 is not None:
-        output.append(OutputItem(line1, depth1, anchored_right, max(count1, count2) % 2, count1 % 2, count2 % 2))
-    merge_tree_lists(output, hightrees1, hightrees2, False)
+    assert tree1.line == tree2.line
+    assert tree1.depth == tree2.depth
+    merge_tree_lists(output, tree1.low_trees, tree2.low_trees, True)
+    if tree1.line is not None:
+        output.append(OutputItem(
+            tree1.line,
+            tree1.depth,
+            anchored_right,
+            max(tree1.count, tree2.count) % 2,
+            tree1.count % 2,
+            tree2.count % 2,
+        ))
+    merge_tree_lists(output, tree1.high_trees, tree2.high_trees, False)
 
 def merge_tree_lists(output: Output, left_trees: list[Tree], right_trees: list[Tree], anchored_right: bool):
     pos1 = 0
@@ -278,11 +278,11 @@ def merge_tree_lists(output: Output, left_trees: list[Tree], right_trees: list[T
         elif pos1 == len(left_trees):
             insert_tree(output, right_trees[pos2], True, anchored_right)
             pos2 += 1
-        elif left_trees[pos1][0] == right_trees[pos2][0]:
+        elif left_trees[pos1].line == right_trees[pos2].line:
             merge_trees(output, left_trees[pos1], right_trees[pos2], anchored_right)
             pos1 += 1
             pos2 += 1
-        elif _unwrap(left_trees[pos1][0]) < _unwrap(right_trees[pos2][0]):
+        elif _unwrap(left_trees[pos1].line) < _unwrap(right_trees[pos2].line):
             insert_tree(output, left_trees[pos1], False, anchored_right)
             pos1 += 1
         else:
@@ -290,11 +290,17 @@ def merge_tree_lists(output: Output, left_trees: list[Tree], right_trees: list[T
             pos2 += 1
 
 def insert_tree(output: Output, tree: Tree, from_right: bool, anchored_right: bool):
-    line, count, lowtrees, hightrees, depth = tree
-    for new_tree in lowtrees:
+    for new_tree in tree.low_trees:
         insert_tree(output, new_tree, from_right, True)
-    output.append(OutputItem(line, depth, anchored_right, count % 2, not from_right, from_right))
-    for new_tree in hightrees:
+    output.append(OutputItem(
+        tree.line,
+        tree.depth,
+        anchored_right,
+        tree.count % 2,
+        not from_right,
+        from_right,
+    ))
+    for new_tree in tree.high_trees:
         insert_tree(output, new_tree, from_right, False)
 
 def test_initial():
