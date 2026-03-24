@@ -1,4 +1,4 @@
-from typing import Optional, TypeAlias, TypeVar
+from typing import Optional, TypeVar
 from difflib import SequenceMatcher
 from enum import unique, Enum
 from dataclasses import dataclass
@@ -22,8 +22,6 @@ class StateItem:
     anchored_right: bool
     count: int
 
-State: TypeAlias = list[StateItem]
-
 @dataclass(frozen=True)
 class OutputItem:
     line: Optional[str]
@@ -32,8 +30,6 @@ class OutputItem:
     count: int
     on_left: int
     on_right: int
-
-Output: TypeAlias = list[OutputItem]
 
 @dataclass(frozen=True)
 class Tree:
@@ -73,7 +69,7 @@ def update_state(raw_state: str, lines: list[str]) -> str:
     for i in range(len(state)):
         if i not in deleted_set and state[i].count % 2 == 0:
             state[i] = _incr_count(state[i])
-    result: State = []
+    result: list[StateItem] = []
     pos_in_insertions = 0
     for pos in range(len(state)+1):
         if pos_in_insertions < len(insertions) and insertions[pos_in_insertions][0] == pos:
@@ -105,7 +101,7 @@ def _incr_count(x: StateItem) -> StateItem:
 def merge_states(state1: str, state2: str) -> tuple[str, list[str]]:
     tree1 = state_to_tree(deserialize_state(state1))
     tree2 = state_to_tree(deserialize_state(state2))
-    status_lines: Output = []
+    status_lines: list[OutputItem] = []
     merge_trees(status_lines, tree1, tree2, False)
     result_lines: list[tuple[str, Conflict]] = []
     begin = 0
@@ -154,14 +150,14 @@ def get_deletions_and_insertions(lines1: list[str], lines2: list[str]) -> tuple[
             insertions.append((l1_begin, lines2[l2_begin:l2_end]))
     return (deletions, insertions)
 
-def serialize_state(state: State) -> str:
+def serialize_state(state: list[StateItem]) -> str:
     result: list[str] = []
     for x in state:
         result.append(f'{x.depth} {['<', '>'][x.anchored_right]} {x.count} {x.line}')
     return '\n'.join(result)
 
-def deserialize_state(mystr: str) -> State:
-    result: State = []
+def deserialize_state(mystr: str) -> list[StateItem]:
+    result: list[StateItem] = []
     if mystr == '':
         return []
     for line in mystr.split('\n'):
@@ -218,7 +214,7 @@ def conflict_code(in_child: int, on_left: int, on_right: int) -> Conflict:
         else:
             return Conflict.DELETED_RIGHT
 
-def state_to_tree(state: State) -> Tree:
+def state_to_tree(state: list[StateItem]) -> Tree:
     root_children_above: list[int] = []
     children_above: list[list[int]] = [[] for _ in range(len(state))]
     last_by_depth: list[Optional[int]] = [None] * len(state)
@@ -241,7 +237,7 @@ def state_to_tree(state: State) -> Tree:
         cb.reverse()
     return Tree(None, -1, [], [pull_out_tree(i, state, children_above, children_below) for i in root_children_above], -1)
 
-def pull_out_tree(pos: int, state: State, children_above: list[list[int]], children_below: list[list[int]]) -> Tree:
+def pull_out_tree(pos: int, state: list[StateItem], children_above: list[list[int]], children_below: list[list[int]]) -> Tree:
     state_item = state[pos]
     return Tree(
         state_item.line,
@@ -252,7 +248,7 @@ def pull_out_tree(pos: int, state: State, children_above: list[list[int]], child
     )
 
 # line is None for the root
-def merge_trees(output: Output, tree1: Tree, tree2: Tree, anchored_right: bool):
+def merge_trees(output: list[OutputItem], tree1: Tree, tree2: Tree, anchored_right: bool):
     assert tree1.line == tree2.line
     assert tree1.depth == tree2.depth
     merge_tree_lists(output, tree1.low_trees, tree2.low_trees, True)
@@ -267,7 +263,7 @@ def merge_trees(output: Output, tree1: Tree, tree2: Tree, anchored_right: bool):
         ))
     merge_tree_lists(output, tree1.high_trees, tree2.high_trees, False)
 
-def merge_tree_lists(output: Output, left_trees: list[Tree], right_trees: list[Tree], anchored_right: bool):
+def merge_tree_lists(output: list[OutputItem], left_trees: list[Tree], right_trees: list[Tree], anchored_right: bool):
     pos1 = 0
     pos2 = 0
     while pos1 < len(left_trees) or pos2 < len(right_trees):
@@ -288,7 +284,7 @@ def merge_tree_lists(output: Output, left_trees: list[Tree], right_trees: list[T
             insert_tree(output, right_trees[pos2], True, anchored_right)
             pos2 += 1
 
-def insert_tree(output: Output, tree: Tree, from_right: bool, anchored_right: bool):
+def insert_tree(output: list[OutputItem], tree: Tree, from_right: bool, anchored_right: bool):
     for new_tree in tree.low_trees:
         insert_tree(output, new_tree, from_right, True)
     output.append(OutputItem(
