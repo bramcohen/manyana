@@ -25,6 +25,9 @@ def update_state(raw_state, lines):
     state = deserialize_state(raw_state)
     if not state:
         return initial_state(lines)
+    current_visible_lines = [line for (line, depth, anchored_right, count) in state if count % 2]
+    if current_visible_lines == lines:
+        return raw_state
     # Ideally matching would bias towards living lines
     deletions, insertions = get_deletions_and_insertions([x[0] for x in state], lines)
     for deletion in deletions:
@@ -390,6 +393,11 @@ def test_generation_counting():
     check_merges(count3, count3, ['A'])
     check_merges(count3, count4, [])
     check_merges(count4, count4, [])
+
+def test_noop_duplicate_lines_preserves_hidden_history():
+    state = initial_state(['A', 'A'])
+    state = update_state(state, ['A'])
+    assert update_state(state, ['A']) == state
 
 def test_insertions_single(a, b, c, d):
     state1, junk1 = merge_states(a, b)
