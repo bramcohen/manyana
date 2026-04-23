@@ -74,7 +74,8 @@ def merge_states(state1, state2):
             hit_left = False
             hit_right = False
             for j in range(begin, i):
-                line, depth, anchored_right, in_child, on_left, on_right = status_lines[j]
+                line, depth, anchored_right, count, on_left, on_right = status_lines[j]
+                in_child = count % 2
                 if on_left != on_right:
                     if in_child == on_left:
                         hit_left = True
@@ -84,13 +85,14 @@ def merge_states(state1, state2):
                     found_add = True
             if hit_left and hit_right and found_add:
                 for j in range(begin, i):
-                    line, depth, anchored_right, in_child, on_left, on_right = status_lines[j]
+                    line, depth, anchored_right, count, on_left, on_right = status_lines[j]
+                    in_child = count % 2
                     if on_left or on_right:
                         result_lines.append((line, conflict_code(in_child, on_left, on_right)))
             else:
                 for j in range(begin, i):
-                    line, depth, anchored_right, in_child, on_left, on_right = status_lines[j]
-                    if in_child:
+                    line, depth, anchored_right, count, on_left, on_right = status_lines[j]
+                    if count % 2:
                         result_lines.append((line, PEACE))
             if i < len(status_lines):
                 result_lines.append((status_lines[i][0], PEACE))
@@ -210,7 +212,7 @@ def merge_trees(output, tree1, tree2, anchored_right):
     assert depth1 == depth2
     merge_tree_lists(output, lowtrees1, lowtrees2, True)
     if line1 is not None:
-        output.append((line1, depth1, anchored_right, max(count1, count2) % 2, count1 % 2, count2 % 2))
+        output.append((line1, depth1, anchored_right, max(count1, count2), count1 % 2, count2 % 2))
     merge_tree_lists(output, hightrees1, hightrees2, False)
 
 def merge_tree_lists(output, left_trees, right_trees, anchored_right):
@@ -238,7 +240,7 @@ def insert_tree(output, tree, from_right, anchored_right):
     line, count, lowtrees, hightrees, depth = tree
     for new_tree in lowtrees:
         insert_tree(output, new_tree, from_right, True)
-    output.append((line, depth, anchored_right, count % 2, not from_right, from_right))
+    output.append((line, depth, anchored_right, count, not from_right, from_right))
     for new_tree in hightrees:
         insert_tree(output, new_tree, from_right, False)
 
@@ -402,7 +404,7 @@ from itertools import permutations
 def test_insertions():
     mylist = [initial_state([x]) for x in ('A', 'B', 'C', 'D')]
     for perm in permutations(mylist):
-        test_insertions_single(*mylist)
+        test_insertions_single(*perm)
 
 def test_insertions_below_single(a, b, c, d):
     state1, junk1 = merge_states(a, b)
@@ -414,7 +416,7 @@ def test_insertions_below():
     initial = initial_state(['X'])
     mylist = [update_state(initial, [x, 'X']) for x in ('A', 'B', 'C', 'D')]
     for perm in permutations(mylist):
-        test_insertions_below_single(*mylist)
+        test_insertions_below_single(*perm)
 
 def test_space_separated_insert_insert():
     initial = initial_state([''])
@@ -466,8 +468,74 @@ def test_insert_low_tree():
     right = update_state(initial, ['A', 'B'])
     check_merges(updated, right, ['X', 'Y', 'A', 'B'])
 
+def check_associative(a, b, c):
+    ab, _ = merge_states(a, b)
+    ab_c, _ = merge_states(ab, c)
+    bc, _ = merge_states(b, c)
+    a_bc, _ = merge_states(a, bc)
+    assert ab_c == a_bc
+    assert current_lines(ab_c) == current_lines(a_bc)
+
+def test_associativity():
+    s = initial_state(['A', 'B'])
+    a = update_state(s, ['A', 'X', 'B'])
+    b = update_state(s, ['A', 'Y', 'B'])
+    c = update_state(s, ['A', 'B', 'Z'])
+    check_associative(a, b, c)
+    a = update_state(s, ['B'])
+    b = update_state(s, ['A'])
+    c = update_state(s, ['A', 'B', 'C'])
+    check_associative(a, b, c)
+    a = update_state(update_state(s, []), ['A', 'B'])
+    b = update_state(s, [])
+    c = update_state(s, [])
+    check_associative(a, b, c)
+    a = initial_state(['P'])
+    b = initial_state(['Q'])
+    c = initial_state(['R'])
+    check_associative(a, b, c)
+    s = initial_state(['M'])
+    left = update_state(s, ['M', 'L'])
+    right = update_state(s, ['R', 'M'])
+    merged, _ = merge_states(left, right)
+    check_associative(left, right, merged)
+    check_associative(merged, left, update_state(s, []))
+
+def check_idempotent(state):
+    merged, _ = merge_states(state, state)
+    assert merged == state
+
+def test_idempotency():
+    check_idempotent(initial_state([]))
+    check_idempotent(initial_state(['A', 'B', 'C']))
+    state = initial_state(['A', 'B'])
+    check_idempotent(state)
+    state = update_state(state, ['A', 'X', 'B'])
+    check_idempotent(state)
+    state = update_state(state, ['A', 'B'])
+    check_idempotent(state)
+    state = update_state(state, ['A', 'X', 'B'])
+    check_idempotent(state)
+    left = update_state(initial_state(['M']), ['M', 'L'])
+    right = update_state(initial_state(['M']), ['R', 'M'])
+    merged, _ = merge_states(left, right)
+    check_idempotent(merged)
+
 if __name__ == '__main__':
-    import inspect
+    import inspect, traceback
+    passes = 0
+    failures = 0
     for name, func in list(globals().items()):
         if name.startswith('test') and callable(func) and not inspect.signature(func).parameters:
-            func()
+            try:
+                func()
+                print("PASS:", name)
+                passes += 1
+            except Exception:
+                print("FAIL:", name)
+                traceback.print_exc()
+                print()
+                failures += 1
+    print(f"{passes} tests passed, {failures} tests failed")
+    if failures:
+        raise SystemExit(1)
