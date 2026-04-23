@@ -10,6 +10,8 @@ The hold-up has been twofold. First, CRDTs are an obscure data structure from th
 
 This algorithm is deeply history-aware — but the broader field of version control has quietly, implicitly accepted that version control *should* be history-aware already. Not just in the sense of tracking history, but in using history to resolve conflicts in ways more involved than simply smashing two sides together given a single common ancestor. Git does this with either subtle history traversal when there isn't a single latest common ancestor (relatively new behavior) or with rebase, which was always extremely history-aware. CRDTs just make the whole thing principled.
 
+Git is very simple, reliable, and versatile, but it isn't very functional. It "supports" squash and rebase the way writing with a pen and paper "supports" inline editing — it implicitly makes humans do a lot of the version control system's job. More sophisticated version control systems haven't offered enough new functionality to compensate for their implicit reductions in versatility and reliability. The case here is: at the minor cost of committing to diffs at commit time, you get safer versions of squash and rebase which Just Work, plus a better version of local undo for the occasional times when you encounter that nightmare and a pretty good version of cherry-picking as a bonus.
+
 ## Conflicts in a Conflict-Free World
 
 The merge algorithm always produces a result. There is no failure case. But "conflict-free" doesn't mean "no conflicts worth showing to the user." The heuristic is that a conflict happens when concurrent edits are *too near* each other — close enough in the document structure that a human should review the combined result rather than having it silently auto-merged. Specifically, "near" means immediately adjacent or only separated by whitespace lines. This is of course a heuristic that can be iterated on.
@@ -65,6 +67,10 @@ def calculate(x):
 Now you can see the structure of the conflict: left deleted the function, and right inserted a line into the middle of it. Each section is labeled with the action and which side performed it. This is both more informative and more honest about what happened — it doesn't force the conflict into a binary "ours vs. theirs" frame.
 
 This kind of scenario — deletion on one side, insertion on the other — is one of the trickiest UX problems for applying CRDTs to text. A naive CRDT would silently keep the inserted line floating in space after the surrounding function was deleted. Manyana instead surfaces it as a conflict, because the edits were *too near* each other to auto-resolve without human judgment.
+
+The "left" and "right" labels in the conflict annotations are entirely advisory. In practice they would be replaced with whatever information is available about each branch — branch names, local vs. remote, author names, or even blame information.
+
+One implementation detail: the current code does not flag conflict sections which only consist of deletions with no insertions on either side. Those regions clean-merge to everything gone. This is a judgment call — flagging deletion-only regions as conflicts could be seen as excessively conservative, but there are reasonable arguments either way. In practice this will inevitably be a flag individual users can set to their liking; the argument is really about the default.
 
 ## Properties
 
@@ -133,6 +139,10 @@ The state is a *weave* — a single linear structure containing every line which
 
 During a merge, both states are converted into trees based on their depth/anchor metadata. The trees are then walked in parallel: shared lines are reconciled by their generation counts, and lines unique to one side are inserted at the correct position. Because everything is structural, there needs to be a deterministic tiebreak when two different branches add lines in the exact same position. The algorithm decides — simplifying a bit — by which side has its first line come lexically first. Conflicts are detected when concurrent edits (e.g., one side inserted while the other deleted in the same region) cannot be auto-resolved.
 
+## Prior Art
+
+The anchoring algorithm used for CRDT sequence types has been independently invented by multiple groups in the last few years. The generation counting trick is older — over twenty years — but oddly doesn't seem to have been discovered by the groups working on anchoring. Combining the two ideas is what allows the entire algorithm to be structural, with no reference to commit IDs in the history.
+
 ## Why Generation Counting
 
 Most people will accept generation counting as simply reasonable, but it's worth justifying the choice. When you delete a line that was previously added, there's a question of interpretation: is this a forward proactive deletion, or a local undo? If you want structural merging which doesn't depend on checking specific merge IDs in the history, you basically have to do generation counting. The alternative — trying to go whole hog on interpreting deletions as local undos — leads to cases that get very complex and difficult to reason about, while generation counting is trivial.
@@ -172,7 +182,11 @@ The best way to see what a mess the local undo interpretation creates is the cri
 
 Start with `AB` (point 0). One branch goes to `AXB` (point 1) then back to `AB` (point 2). Another branch independently goes from point 0 to `AXB` (point 3) then back to `AB` (point 4). Merging points 2 and 4 should obviously give `AB`. But there's a problem. If you merge points 1 and 4, the local undo interpretation gives you a clean merge to `AXB`. Merging points 3 and 2 also gives `AXB`. But then merging those two `AXB` results together — by the eventual consistency rule and just plain common sense — should produce `AB`, which is a strange result where the child looks like neither of its parents. Out of sheer pragmatism, I gave up on calculating those cases and, worse, figuring out how they should be presented in conflicts, and went with generation counting.
 
+Generation counting avoids the criss-cross nightmare but doesn't completely eliminate the possibility of a merge looking like neither parent. Consider a file containing `XaXbX` where X is a repeated line (e.g. a blank line). One branch goes `XaXbX` → `aXbX` → `XX` (deleting the first X then deleting a and b). The other branch goes `XaXbX` → `XaXb` → `XX` (deleting the last X then deleting a and b). Both arrive at `XX`. But the first branch deleted the first of three X's while the second deleted the last, so merging them clean-merges down to a single `X`. This is a fairly artificial example which would be hard to have happen in practice, especially with a diff algorithm that tries hard to keep repeated lines attached to consistent positions. But if it does happen, the history has "earned" this behavior — going down to a single X with no conflict really is the right thing to do, as counterintuitive as it may seem before working through the example.
+
 ## On Diff Algorithms
+
+Committing to diffs at commit time is a clear behavioral win, but it does create implementation risk. The exact interpretation of what happened in a diff gets baked into the state permanently, so any such implementation needs a core of functionality which is very well tested and audited and only updated extremely conservatively. This is why the demo implementation is as simple as possible within the constraints of eventual consistency.
 
 This implementation uses Python's built-in `SequenceMatcher` for diffing. A production system should use a better diff algorithm — git's histogram diff is probably the current state of the art. Since the exact interpretation of a diff gets baked into the state at commit time, the quality of the diff algorithm directly affects the quality of the structural history.
 
@@ -198,9 +212,9 @@ In a CRDT system, the rebase approach means creating a new fictional history in 
 
 A better approach is to use cherry-picking. You make the undo locally, then create a de-undo branch and merge it into main. This has some quirks — in particular, the de-undo can itself have erroneous conflicts with main if the section in question was otherwise modified there. But it mostly works and behaves reasonably. When it acts off, it produces false positives on conflicts, and they're presented reasonably, which is much better than false negatives.
 
-## Rebase Without Destroying History
+## Rebase and Squash Without Destroying History
 
-Rebase as conventionally done in git is history-destroying, but that isn't fundamental to the concept of rebase.
+Rebase and squash as conventionally done in git are history-destroying, but that isn't fundamental to either concept. The goal is not to eliminate conventional rebase and squash — they still have their place, particularly for local cleanup before sharing. The goal is to also offer safe versions for times when you want the tidiness of a rebased or squashed history without actually throwing out what happened.
 
 Consider a case: on a local branch you forked from version 0 on main, then made local changes to get version 1 then version 2. Meanwhile main has been updated to version 3. The "merge" way of updating your branch is to merge together versions 2 and 3 and fix conflicts. The "rebase" way is to replay your commits on top of the new main: merge versions 1 and 3 and fix conflicts to get version 4, then merge 4 and 2 and fix conflicts to get version 5.
 
@@ -221,6 +235,8 @@ Consider a case: on a local branch you forked from version 0 on main, then made 
 
 The only thing necessary for this to both keep the history and preserve rebase semantics is that version 4 should remember that 3 is its "primary" ancestor and version 5 should remember that 4 is its "primary" ancestor — advisory information which could be stored in the DAG. Following this methodology would get the benefits of a clean rebased history without so many erroneous conflicts and dangerous traps.
 
+Safe squash works the same way. Instead of picking the immediate previous merge as the "primary" ancestor, you pick a further-back ancestor. The merge still happens — all the history is still there — but blame and history traversal tools that follow the primary path will see a single squashed commit, just like git's squash. The difference is that the full history is still available if you need it. Conventional squash literally throws out history and replaces it with a fiction that whoever performed the squash wrote everything. Safe squash gives you strictly more information: if you make blame and history always follow the primary path, a safe squash produces nearly identical output to a conventional one, but the unsquashed history is still there. This eliminates the footguns around merging in branches that were already squashed or rebased.
+
 It's worth noting that aggressive rebasing this way quickly produces merge topologies with no single latest common ancestor. Approaches which rely on 3-way merge are likely to blow up in your face here — git's recursive merge strategy exists specifically to paper over this problem, and it's fragile. CRDTs handle it just fine, because the history is encoded in the weave itself rather than reconstructed from the DAG at merge time. The whole concept of LCA becomes irrelevant.
 
 ## Status
@@ -237,7 +253,7 @@ The test suite is built into the module:
 python manyana.py
 ```
 
-All test functions prefixed with `test` are discovered and run automatically. No output means all tests passed.
+All test functions prefixed with `test` are discovered and run automatically. The runner prints PASS or FAIL for each test and exits with a nonzero status if any test fails.
 
 ## Provenance
 
