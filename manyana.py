@@ -142,6 +142,8 @@ PEACE = 5
 conflict_strings = ['added left', 'added right', 'added both',
         'deleted left', 'deleted right', 'deleted both']
 
+BEGIN_PREFIX = '<<<<<<< begin '
+DIVIDER_PREFIX = '======= begin '
 END = '>>>>>>> end conflict'
 
 def show_conflicts(result_lines):
@@ -152,9 +154,9 @@ def show_conflicts(result_lines):
             if last_state != PEACE:
                 final_result.append(END)
         elif last_state == PEACE:
-            final_result.append('<<<<<<< begin ' + conflict_strings[new_state])
+            final_result.append(BEGIN_PREFIX + conflict_strings[new_state])
         elif last_state != new_state:
-            final_result.append('======= begin ' + conflict_strings[new_state])
+            final_result.append(DIVIDER_PREFIX + conflict_strings[new_state])
         final_result.append(line)
         last_state = new_state
     if last_state != PEACE:
@@ -246,6 +248,97 @@ def insert_tree(output, tree, from_right, anchored_right):
     output.append((line, depth, anchored_right, count, not from_right, from_right))
     for new_tree in hightrees:
         insert_tree(output, new_tree, from_right, False)
+
+# ---------------------------------------------------------------------------
+# Commit DAG — the extended format
+#
+# The weave above tracks line-level history.  This is the missing layer:
+# which commits exist, who their parents are, and which parent is "primary".
+#
+# Primary-parent annotation is the trick that lets rebase keep full history
+# while presenting a clean linear log.  Following primary parents from a
+# tip gives the rebased trunk; following all parents recovers the truth.
+# ---------------------------------------------------------------------------
+
+ROOT = 'root'
+COMMIT = 'commit'
+MERGE = 'merge'
+REBASE_STEP = 'rebase_step'
+
+
+class DAG:
+    def __init__(self):
+        self.commits = {}
+        self._next_id = 0
+
+    def _record(self, state, parents, primary, kind, message):
+        cid = self._next_id
+        self._next_id += 1
+        self.commits[cid] = {
+            'state': state,
+            'parents': list(parents),
+            'primary': primary,
+            'kind': kind,
+            'message': message,
+        }
+        return cid
+
+    def root(self, lines, message=''):
+        return self._record(initial_state(lines), [], None, ROOT, message)
+
+    def commit(self, parent_id, lines, message=''):
+        new_state = update_state(self.commits[parent_id]['state'], lines)
+        return self._record(new_state, [parent_id], parent_id, COMMIT, message)
+
+    def merge(self, left_id, right_id, primary=None, kind=MERGE, message=''):
+        if primary is None:
+            primary = left_id
+        assert primary in (left_id, right_id), 'primary must be one of the parents'
+        merged, annotated = merge_states(
+            self.commits[left_id]['state'],
+            self.commits[right_id]['state'],
+        )
+        cid = self._record(merged, [left_id, right_id], primary, kind, message)
+        return cid, annotated
+
+    def state(self, cid):
+        return self.commits[cid]['state']
+
+    def primary_chain(self, cid):
+        """Walk primary parents back to a root.  The 'clean log' view."""
+        chain = []
+        while cid is not None:
+            chain.append(cid)
+            cid = self.commits[cid]['primary']
+        return chain
+
+    def ancestors(self, cid):
+        """All reachable ancestors via any parent edge."""
+        seen = set()
+        stack = [cid]
+        while stack:
+            c = stack.pop()
+            if c in seen:
+                continue
+            seen.add(c)
+            stack.extend(self.commits[c]['parents'])
+        return seen
+
+    def to_dict(self):
+        """Plain-data snapshot.  All values are primitives / lists / dicts;
+        round-trips through json.dumps / json.loads when paired with from_dict.
+        This is what makes the DAG an *extended format*, not just an
+        in-memory data structure."""
+        return {'next_id': self._next_id, 'commits': self.commits}
+
+    @classmethod
+    def from_dict(cls, data):
+        """Inverse of to_dict.  Tolerates JSON's stringification of int keys."""
+        d = cls()
+        d._next_id = data['next_id']
+        d.commits = {int(k): v for k, v in data['commits'].items()}
+        return d
+
 
 def test_initial():
     assert initial_state([]) == ''
